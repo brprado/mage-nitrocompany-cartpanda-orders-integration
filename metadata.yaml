@@ -55,4 +55,5 @@ notification_config:
 project_uuid: ab30490754c34500bda870ea0d845367
 features:
   add_new_block_v2: true
+  display_local_timezone: true
 pipelines:

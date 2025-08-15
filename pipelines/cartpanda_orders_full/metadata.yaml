@@ -9,13 +9,17 @@ blocks:
   has_callback: false
   language: python
   name: cartpanda_orders_extraction
-  retry_config: null
-  status: executed
+  retry_config:
+    delay: 10
+    exponential_backoff: false
+    max_delay: 20
+    retries: 3
+  status: updated
   timeout: null
   type: data_loader
   upstream_blocks: []
   uuid: cartpanda_orders_extraction
-- all_upstream_blocks_executed: true
+- all_upstream_blocks_executed: false
   color: null
   configuration:
     file_path: transformers/transformer_orders.py
@@ -35,7 +39,7 @@ blocks:
   upstream_blocks:
   - cartpanda_orders_extraction
   uuid: transformer_orders
-- all_upstream_blocks_executed: true
+- all_upstream_blocks_executed: false
   color: null
   configuration: {}
   downstream_blocks: []

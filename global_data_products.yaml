@@ -1,0 +1,4 @@
+cartpanda_orders_full_pipeline:
+  object_type: pipeline
+  object_uuid: cartpanda_orders_full
+  repo_path: /home/src/nitro_integracoes
