@@ -3,36 +3,36 @@ blocks:
   color: null
   configuration: {}
   downstream_blocks:
-  - data_transformer
+  - transformers_cartpanda_orders_v2
   executor_config: null
   executor_type: local_python
   has_callback: false
   language: python
-  name: Extrai clientes cartpanda
+  name: incremental_orders_cartpanda
   retry_config: null
-  status: updated
+  status: executed
   timeout: null
   type: data_loader
   upstream_blocks: []
-  uuid: extrai_clientes_cartpanda
-- all_upstream_blocks_executed: false
+  uuid: incremental_orders_cartpanda
+- all_upstream_blocks_executed: true
   color: null
   configuration: {}
   downstream_blocks:
-  - postgres_exporter
+  - postgres_upsert_orders_and_items
   executor_config: null
   executor_type: local_python
   has_callback: false
   language: python
-  name: data_transformer
+  name: transformers_cartpanda_orders_v2
   retry_config: null
-  status: updated
+  status: executed
   timeout: null
   type: transformer
   upstream_blocks:
-  - extrai_clientes_cartpanda
-  uuid: data_transformer
-- all_upstream_blocks_executed: false
+  - incremental_orders_cartpanda
+  uuid: transformers_cartpanda_orders_v2
+- all_upstream_blocks_executed: true
   color: null
   configuration: {}
   downstream_blocks: []
@@ -40,26 +40,26 @@ blocks:
   executor_type: local_python
   has_callback: false
   language: python
-  name: postgres_exporter
+  name: postgres_upsert_orders_and_items
   retry_config: null
-  status: updated
+  status: executed
   timeout: null
   type: data_exporter
   upstream_blocks:
-  - data_transformer
-  uuid: postgres_exporter
+  - transformers_cartpanda_orders_v2
+  uuid: postgres_upsert_orders_and_items
 cache_block_output_in_memory: false
 callbacks: []
 concurrency_config: {}
 conditionals: []
-created_at: '2025-08-05 11:53:54.279941+00:00'
+created_at: '2025-06-25 12:30:45.892808+00:00'
 data_integration: null
 description: null
 executor_config: {}
 executor_count: 1
 executor_type: null
 extensions: {}
-name: extract_customers_cartpanda
+name: cartpanda_orders_incremental
 notification_config: {}
 remote_variables_dir: null
 retry_config: {}
@@ -67,8 +67,9 @@ run_pipeline_in_one_process: false
 settings:
   triggers: null
 spark_config: {}
-tags: []
+tags:
+- cartpanda-prod
 type: python
-uuid: extract_customers_cartpanda
+uuid: cartpanda_orders_incremental
 variables_dir: /home/src/mage_data/nitro_integracoes
 widgets: []
