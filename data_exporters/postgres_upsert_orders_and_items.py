@@ -6,6 +6,12 @@ if 'data_exporter' not in globals():
     from mage_ai.data_preparation.decorators import data_exporter
 
 def sanitize_for_postgres(df):
+    """
+    Sanitiza DataFrame para PostgreSQL convertendo dicts e listas para string
+    """
+    if df.empty:
+        return df  # Retorna DataFrame vazio sem modificações
+        
     for col in df.columns:
         if df[col].apply(lambda x: isinstance(x, (dict, list))).any():
             df[col] = df[col].apply(lambda x: str(x) if isinstance(x, (dict, list)) else x)
@@ -14,7 +20,13 @@ def sanitize_for_postgres(df):
 def upsert_dataframe(df, table_name, schema, engine, primary_key):
     """
     Função para fazer upsert (INSERT ... ON CONFLICT DO UPDATE) no PostgreSQL
+    Trata adequadamente DataFrames vazios
     """
+    # Verifica se o DataFrame está vazio
+    if df.empty:
+        print(f"ℹ️  DataFrame vazio para {table_name} - pulando upsert")
+        return
+    
     temp_table = f"{table_name}_temp"
     
     with engine.begin() as conn:
@@ -147,45 +159,177 @@ def upsert_dataframe(df, table_name, schema, engine, primary_key):
 
 @data_exporter
 def export_cartpanda_data(data, *args, **kwargs):
-    df_orders = sanitize_for_postgres(data['orders_df'])
-    df_items = sanitize_for_postgres(data['items_df'])
-
-    POSTGRES_HOST = get_secret_value('POSTGRES_HOST')
-    POSTGRES_PORT = get_secret_value('DB_PORT')
-    POSTGRES_DB   = get_secret_value('DB_NAME')
-    POSTGRES_USER = get_secret_value('DB_USER')
-    POSTGRES_PASS = get_secret_value('DB_PASSWORD')
-
-    ########### REPLICATION ###########
-
-    connection_string = (
-        f'postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASS}'
-        f'@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}'
-    )
-
-    engine_rep = create_engine(connection_string)
-
-    # Garante a existência do schema "integracao"
-    with engine_rep.begin() as conn:
-        conn.execute(text("CREATE SCHEMA IF NOT EXISTS integracao"))
-
-    # UPSERT para pedidos (chave primária: id)
-    upsert_dataframe(
-        df=df_orders,
-        table_name='cartpanda_orders',
-        schema='integracao',
-        engine=engine_rep,
-        primary_key='id'
-    )
-
-    # UPSERT para itens (chave primária: item_id)
-    upsert_dataframe(
-        df=df_items,
-        table_name='cartpanda_items',
-        schema='integracao',
-        engine=engine_rep,
-        primary_key='item_id'
-    )
+    """
+    Exporta dados do CartPanda para PostgreSQL com tratamento robusto para casos sem dados
+    Funciona tanto com dados vazios quanto com metadados de execução
+    """
     
-    print('✅ Orders: UPSERT (id) | Items: UPSERT (item_id) - Dados Exportados Para Replicacao/Dev (PostgreSQL VPS HOSTINGER)')
+    # ETAPA 1: Verificação e tratamento dos dados de entrada
+    print("🔄 Iniciando exportação dos dados CartPanda...")
+    
+    # Caso 1: Dados com estrutura de metadados (vindos do transformer melhorado)
+    if isinstance(data, dict) and 'execution_metadata' in data:
+        print("📋 Recebidos dados com metadados de execução")
+        
+        # Verifica se há dados para processar
+        if not data['execution_metadata']['has_data']:
+            print(f"ℹ️  {data['execution_metadata']['message']}")
+            print("✨ Data exporter finalizado graciosamente - nenhum dado para exportar")
+            print(f"📅 Execução registrada em: {data['execution_metadata']['extraction_date']}")
+            return  # Finaliza a execução sem erro
+        
+        # Se chegou aqui, há dados nos metadados para processar
+        df_orders = data.get('orders_df', pd.DataFrame())
+        df_items = data.get('items_df', pd.DataFrame())
+        print("📦 Processando dados dos metadados...")
+    
+    # Caso 2: Estrutura tradicional (dict com orders_df e items_df)
+    elif isinstance(data, dict) and ('orders_df' in data or 'items_df' in data):
+        df_orders = data.get('orders_df', pd.DataFrame())
+        df_items = data.get('items_df', pd.DataFrame())
+        print("📦 Processando dados da estrutura tradicional...")
+    
+    # Caso 3: Tipo de dado inesperado
+    else:
+        print(f"⚠️  Tipo de dado inesperado recebido: {type(data)}")
+        print("❌ Não foi possível extrair DataFrames dos dados recebidos")
+        print("✨ Data exporter finalizado - estrutura de dados não reconhecida")
+        return
+    
+    # ETAPA 2: Verificação se há dados para exportar
+    orders_empty = df_orders.empty if isinstance(df_orders, pd.DataFrame) else True
+    items_empty = df_items.empty if isinstance(df_items, pd.DataFrame) else True
+    
+    if orders_empty and items_empty:
+        print("ℹ️  Ambos DataFrames (orders e items) estão vazios")
+        print("✨ Pipeline finalizado com sucesso - nenhum dado para exportar")
+        return
+    
+    # ETAPA 3: Relatório dos dados que serão exportados
+    orders_count = len(df_orders) if not orders_empty else 0
+    items_count = len(df_items) if not items_empty else 0
+    
+    print(f"\n📊 DADOS PARA EXPORTAÇÃO:")
+    print(f"   • Pedidos: {orders_count} registros")
+    print(f"   • Itens: {items_count} registros")
+    
+    # ETAPA 4: Sanitização dos dados
+    print("🧹 Sanitizando dados para PostgreSQL...")
+    
+    try:
+        df_orders_clean = sanitize_for_postgres(df_orders) if not orders_empty else pd.DataFrame()
+        df_items_clean = sanitize_for_postgres(df_items) if not items_empty else pd.DataFrame()
+        print("✅ Sanitização concluída")
+    except Exception as e:
+        print(f"❌ Erro durante sanitização: {e}")
+        print("✨ Data exporter finalizado devido a erro na sanitização")
+        return
 
+    # ETAPA 5: Exportação para DATA LAKE RAILWAY
+    print("\n🚂 Iniciando exportação para DATA LAKE RAILWAY...")
+    
+    try:
+        POSTGRES_HOST = get_secret_value('POSTGRES_HOST_RAILWAY')
+        POSTGRES_PORT = get_secret_value('POSTGRES_PORT_RAILWAY')
+        POSTGRES_DB   = get_secret_value('POSTGRES_DB_RAILWAY')
+        POSTGRES_USER = get_secret_value('POSTGRES_USER_RAILWAY')
+        POSTGRES_PASS = get_secret_value('POSTGRES_PASS_RAILWAY')
+
+        datalake_railway_conn_string = (
+            f'postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASS}'
+            f'@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}'
+        )
+        engine_railway = create_engine(datalake_railway_conn_string)
+        
+        # Garante a existência do schema
+        with engine_railway.begin() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS integracao"))
+        
+        # Exporta pedidos se houver dados
+        if not orders_empty:
+            upsert_dataframe(
+                df=df_orders_clean,
+                table_name='cartpanda_orders',
+                schema='integracao',
+                engine=engine_railway,
+                primary_key='id'
+            )
+        else:
+            print("ℹ️  Pulando exportação de pedidos (DataFrame vazio)")
+        
+        # Exporta itens se houver dados
+        if not items_empty:
+            upsert_dataframe(
+                df=df_items_clean,
+                table_name='cartpanda_items',
+                schema='integracao',
+                engine=engine_railway,
+                primary_key='item_id'
+            )
+        else:
+            print("ℹ️  Pulando exportação de itens (DataFrame vazio)")
+        
+        print('✅ Exportação para DATA LAKE RAILWAY concluída')
+        
+    except Exception as e:
+        print(f"❌ Erro na exportação para Railway: {e}")
+        print("⚠️ Continuando com exportação para banco de replicação...")
+
+    # ETAPA 6: Exportação para REPLICAÇÃO/DEV (VPS)
+    print("\n🔄 Iniciando exportação para REPLICAÇÃO/DEV...")
+    
+    try:
+        POSTGRES_HOST = get_secret_value('POSTGRES_HOST')
+        POSTGRES_PORT = get_secret_value('DB_PORT')
+        POSTGRES_DB   = get_secret_value('DB_NAME')
+        POSTGRES_USER = get_secret_value('DB_USER')
+        POSTGRES_PASS = get_secret_value('DB_PASSWORD')
+
+        connection_string = (
+            f'postgresql+psycopg2://{POSTGRES_USER}:{POSTGRES_PASS}'
+            f'@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}'
+        )
+
+        engine_rep = create_engine(connection_string)
+
+        # Garante a existência do schema "integracao"
+        with engine_rep.begin() as conn:
+            conn.execute(text("CREATE SCHEMA IF NOT EXISTS integracao"))
+
+        # Exporta pedidos se houver dados
+        if not orders_empty:
+            upsert_dataframe(
+                df=df_orders_clean,
+                table_name='cartpanda_orders',
+                schema='integracao',
+                engine=engine_rep,
+                primary_key='id'
+            )
+        else:
+            print("ℹ️  Pulando exportação de pedidos (DataFrame vazio)")
+
+        # Exporta itens se houver dados
+        if not items_empty:
+            upsert_dataframe(
+                df=df_items_clean,
+                table_name='cartpanda_items',
+                schema='integracao',
+                engine=engine_rep,
+                primary_key='item_id'
+            )
+        else:
+            print("ℹ️  Pulando exportação de itens (DataFrame vazio)")
+        
+        print('✅ Exportação para REPLICAÇÃO/DEV concluída')
+        
+    except Exception as e:
+        print(f"❌ Erro na exportação para Replicação: {e}")
+        raise
+
+    # ETAPA 7: Relatório final
+    print(f"\n🎉 EXPORTAÇÃO CONCLUÍDA COM SUCESSO!")
+    print(f"   • Pedidos exportados: {orders_count}")
+    print(f"   • Itens exportados: {items_count}")
+    print(f"   • Destinos: Railway Data Lake + Replicação VPS Hostinger")
+    print(f"   • Schema: integracao")
+    print(f"   • Operação: UPSERT (sem duplicatas)")

@@ -49,7 +49,7 @@ blocks:
   language: python
   name: postgres_orders_exporter
   retry_config: null
-  status: failed
+  status: updated
   timeout: null
   type: data_exporter
   upstream_blocks:

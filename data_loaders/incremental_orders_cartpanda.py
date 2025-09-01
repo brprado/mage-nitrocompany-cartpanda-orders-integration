@@ -77,6 +77,7 @@ def fetch_orders_for_slug(slug, headers, updated_at_min=None):
 def cartpanda_orders_extraction(*args, **kwargs):
     """
     Extrai pedidos do CartPanda com filtro incremental baseado em updated_at_min
+    Retorna sempre uma estrutura válida, mesmo quando não há dados
     """
     slugs = ['vita-waves', 'nutra-force-wl', 'nutra-force-di', 'nutra-force', 'vita-labs']
     API_KEY = get_secret_value('CARTPANDA_API_KEY')
@@ -122,7 +123,7 @@ def cartpanda_orders_extraction(*args, **kwargs):
             except Exception as e:
                 print(f"❌ Erro ao coletar pedidos de {slug}: {e}")
 
-    # Log final
+    # Log final e preparação do retorno
     if all_orders:
         print(f"\n📦 Total de pedidos coletados: {len(all_orders)}")
         
@@ -136,8 +137,25 @@ def cartpanda_orders_extraction(*args, **kwargs):
             if dates:
                 dates.sort()
                 print(f"📅 Range de updated_at: {dates[0]} até {dates[-1]}")
+        
+        # Retorna os dados normalmente quando há registros
+        return all_orders
     else:
         brazil_date = datetime.now(pytz.timezone('America/Sao_Paulo')).strftime('%d/%m/%Y')
         print(f"\nℹ️  Nenhum pedido novo/atualizado encontrado desde meia-noite do Brasil ({brazil_date})")
-    
-    return all_orders
+        print("✨ Pipeline será encerrado graciosamente - nenhum dado para processar")
+        
+        # SOLUÇÃO 1: Retorna lista vazia (mais simples)
+        # return []
+        
+        # SOLUÇÃO 2: Retorna estrutura que sinaliza para próximas etapas que não há dados
+        return {
+            'execution_metadata': {
+                'has_data': False,
+                'extraction_timestamp': brazil_time.isoformat(),
+                'extraction_date': brazil_date,
+                'message': 'Nenhum registro encontrado para o período especificado'
+            },
+            'orders': [],  # Lista vazia de pedidos
+            'total_orders': 0
+        }
